@@ -65,17 +65,7 @@ const cleanParams = (params) =>
         value !== undefined && value !== null && String(value).trim() !== "",
     ),
   );
-// const tabs = [
-//   ["dashboard", "Tổng quan", "fa-chart-line"],
-//   ["trips", "Chuyến xe", "fa-route"],
-//   ["bookings", "Đặt vé", "fa-ticket"],
-//   ["invoices", "Hóa đơn", "fa-file-invoice"],
-//   ["tickets", "Quản lý vé", "fa-couch"],
-//   ["transactions", "Giao dịch", "fa-money-bill-wave"],
-//   ["buses", "Xe", "fa-bus"],
-//   ["operators", "Nhà xe", "fa-building"],
-//   ["users", "Người dùng", "fa-users"],
-// ];
+
 const tabs = [
   ["dashboard", "Tổng quan", "fa-chart-line"],
   ["trips", "Chuyến xe", "fa-route"],
