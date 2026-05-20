@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using BaseCore.Entities;
 using BaseCore.Repository;
+using BaseCore.APIService.Services;
 using System.Data;
 using System.Security.Claims;
 
@@ -13,10 +14,12 @@ namespace BaseCore.APIService.Controllers
     public class BookingsController : ControllerBase
     {
         private readonly MySqlDbContext _context;
+        private readonly ExternalIntegrationService _integrations;
 
-        public BookingsController(MySqlDbContext context)
+        public BookingsController(MySqlDbContext context, ExternalIntegrationService integrations)
         {
             _context = context;
+            _integrations = integrations;
         }
 
         [HttpGet]
@@ -305,6 +308,10 @@ namespace BaseCore.APIService.Controllers
                 if (trip == null)
                     return NotFound(new { message = "Không tìm thấy chuyến xe" });
 
+                var externalInvalidSeats = await _integrations.ValidateSeatsAsync(Math.Max(trip.Bus?.Capacity ?? 0, 0), seatLabels);
+                if (externalInvalidSeats is { Count: > 0 })
+                    return BadRequest(new { message = $"Ghế không tồn tại: {string.Join(", ", externalInvalidSeats)}" });
+
                 if (!request.PickupStopId.HasValue || !request.DropoffStopId.HasValue)
                     return BadRequest(new { message = "Điểm đón và điểm trả là bắt buộc" });
 
@@ -410,13 +417,22 @@ namespace BaseCore.APIService.Controllers
                 _context.Bookings.Add(booking);
                 await _context.SaveChangesAsync();
 
+                var invoiceCode = await _integrations.GenerateInvoiceCodeAsync(booking.BookingID)
+                    ?? $"VXAZ-{DateTime.Now:yyyyMMdd}-{booking.BookingID:000000}";
+                var qrText = await _integrations.GenerateQrTextAsync(
+                    booking.BookingID,
+                    booking.TripID,
+                    seatLabels,
+                    booking.CustomerPhone)
+                    ?? $"BOOKING:{booking.BookingID};TRIP:{booking.TripID};SEAT:{string.Join(",", seatLabels)};PHONE:{booking.CustomerPhone}";
+
                 foreach (var seatLabel in seatLabels)
                 {
                     _context.TicketSeats.Add(new TicketSeat
                     {
                         BookingID = booking.BookingID,
                         SeatLabel = seatLabel,
-                        QRCode = $"BOOKING:{booking.BookingID};TRIP:{booking.TripID};SEAT:{seatLabel};PHONE:{booking.CustomerPhone}"
+                        QRCode = $"{invoiceCode};{qrText};SEAT:{seatLabel}"
                     });
                 }
 

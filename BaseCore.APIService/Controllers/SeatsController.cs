@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using BaseCore.Repository;
 using BaseCore.Entities;
+using BaseCore.APIService.Services;
 using System.Data;
 using System.Security.Claims;
 
@@ -13,10 +14,12 @@ namespace BaseCore.APIService.Controllers
     public class SeatsController : ControllerBase
     {
         private readonly MySqlDbContext _context;
+        private readonly ExternalIntegrationService _integrations;
 
-        public SeatsController(MySqlDbContext context)
+        public SeatsController(MySqlDbContext context, ExternalIntegrationService integrations)
         {
             _context = context;
+            _integrations = integrations;
         }
 
         [HttpGet("trip/{tripId:int}")]
@@ -38,7 +41,7 @@ namespace BaseCore.APIService.Controllers
                 return NotFound(new { message = "Không tìm thấy chuyến xe" });
 
             var capacity = Math.Max(trip.Capacity, 0);
-            var seatLabels = GenerateSeatLabels(capacity);
+            var seatLabels = await GetSeatLabelsAsync(capacity);
             var currentUserId = GetCurrentUserId();
             var now = DateTime.Now;
 
@@ -134,7 +137,11 @@ namespace BaseCore.APIService.Controllers
                 if (trip == null)
                     return NotFound(new { message = "Không tìm thấy chuyến xe" });
 
-                var validSeatLabels = GenerateSeatLabels(Math.Max(trip.Bus?.Capacity ?? 0, 0));
+                var capacity = Math.Max(trip.Bus?.Capacity ?? 0, 0);
+                var validSeatLabels = await GetSeatLabelsAsync(capacity);
+                var externalInvalidSeats = await _integrations.ValidateSeatsAsync(capacity, requestedSeats);
+                if (externalInvalidSeats is { Count: > 0 })
+                    return BadRequest(new { message = $"Ghế không tồn tại: {string.Join(", ", externalInvalidSeats)}" });
                 var validSeats = validSeatLabels.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var invalidSeats = requestedSeats.Where(x => !validSeats.Contains(x)).ToList();
                 if (invalidSeats.Count > 0)
@@ -369,6 +376,15 @@ namespace BaseCore.APIService.Controllers
             }
 
             return labels;
+        }
+
+        private async Task<List<string>> GetSeatLabelsAsync(int capacity)
+        {
+            var externalSeats = await _integrations.GenerateSeatsAsync(capacity);
+            if (externalSeats != null && externalSeats.Count == capacity)
+                return externalSeats.Select(NormalizeSeatLabel).ToList();
+
+            return GenerateSeatLabels(capacity);
         }
 
         private static string GetRowLabel(int rowIndex)

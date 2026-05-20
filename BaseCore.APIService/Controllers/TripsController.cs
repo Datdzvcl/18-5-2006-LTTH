@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using BaseCore.Entities;
 using BaseCore.Repository;
+using BaseCore.APIService.Services;
 
 namespace BaseCore.APIService.Controllers
 {
@@ -11,10 +12,12 @@ namespace BaseCore.APIService.Controllers
     public class TripsController : ControllerBase
     {
         private readonly MySqlDbContext _context;
+        private readonly ExternalIntegrationService _integrations;
 
-        public TripsController(MySqlDbContext context)
+        public TripsController(MySqlDbContext context, ExternalIntegrationService integrations)
         {
             _context = context;
+            _integrations = integrations;
         }
 
         // GET /api/trips?page=1&pageSize=20
@@ -201,7 +204,7 @@ namespace BaseCore.APIService.Controllers
             var hasActiveStops = await _context.StopPoints.AnyAsync(x => x.TripID == id && x.IsActive);
             if (!hasActiveStops)
             {
-                AddDefaultStopPoints(trip);
+                await AddDefaultStopPointsAsync(trip);
                 await _context.SaveChangesAsync();
             }
 
@@ -402,7 +405,7 @@ namespace BaseCore.APIService.Controllers
             _context.Trips.Add(trip);
             await _context.SaveChangesAsync();
 
-            AddDefaultStopPoints(trip);
+            await AddDefaultStopPointsAsync(trip);
             await _context.SaveChangesAsync();
 
             return Ok(trip);
@@ -427,7 +430,7 @@ namespace BaseCore.APIService.Controllers
                 .AnyAsync(x => x.TripID == id && x.IsActive);
             if (!hasActiveStops)
             {
-                AddDefaultStopPoints(trip);
+                await AddDefaultStopPointsAsync(trip);
                 await _context.SaveChangesAsync();
             }
 
@@ -502,8 +505,17 @@ namespace BaseCore.APIService.Controllers
             return null;
         }
 
-        private void AddDefaultStopPoints(Trip trip)
+        private async Task AddDefaultStopPointsAsync(Trip trip)
         {
+            await _integrations.EstimateRouteAsync(trip.DepartureLocation, trip.ArrivalLocation);
+
+            var externalStops = await _integrations.GenerateStopsAsync(trip);
+            if (externalStops != null && externalStops.Count > 0)
+            {
+                _context.StopPoints.AddRange(externalStops);
+                return;
+            }
+
             var totalMinutes = Math.Max(0, (int)Math.Round((trip.ArrivalTime - trip.DepartureTime).TotalMinutes));
             var middleOffset = totalMinutes > 0 ? Math.Max(1, totalMinutes / 2) : 0;
 

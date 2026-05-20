@@ -5,6 +5,7 @@ using Microsoft.OpenApi.Models;
 using BaseCore.Repository;
 using BaseCore.Repository.EFCore;
 using BaseCore.APIService.Services;
+using System.Diagnostics;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -80,6 +81,10 @@ builder.Services.AddScoped<IBusRepositoryEF, BusRepositoryEF>();
 
 // Background job: tự động xóa booking Pending quá 10 phút
 builder.Services.AddHostedService<ExpiredBookingCleanupService>();
+builder.Services.AddHttpClient<ExternalIntegrationService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(3);
+});
 
 // JWT Authentication
 var key = Encoding.ASCII.GetBytes(builder.Configuration["Jwt:SecretKey"] ?? "YourSecretKeyForAuthenticationShouldBeLongEnough");
@@ -102,6 +107,25 @@ builder.Services.AddAuthentication(x =>
 });
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("RequestLog");
+    var stopwatch = Stopwatch.StartNew();
+    var request = context.Request;
+
+    logger.LogInformation("[C#] Request {Method} {Path}{QueryString}", request.Method, request.Path, request.QueryString);
+
+    await next();
+
+    stopwatch.Stop();
+    logger.LogInformation(
+        "[C#] Response {Method} {Path} => {StatusCode} in {ElapsedMs}ms",
+        request.Method,
+        request.Path,
+        context.Response.StatusCode,
+        stopwatch.ElapsedMilliseconds);
+});
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
